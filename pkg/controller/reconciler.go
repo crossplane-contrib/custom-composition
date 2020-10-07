@@ -21,9 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/crossplane/crossplane-runtime/pkg/resource/unstructured"
-
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,7 +31,9 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/apis/core/v1alpha1"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	rresource "github.com/crossplane/crossplane-runtime/pkg/resource"
+	"github.com/crossplane/crossplane-runtime/pkg/resource/unstructured"
 	"github.com/crossplane/crossplane-runtime/pkg/resource/unstructured/composite"
 )
 
@@ -152,11 +153,23 @@ func (r *Reconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) { // nolin
 		cr.SetConditions(v1alpha1.ReconcileError(errors.Wrap(err, errChildResourcePatchers)))
 		return ctrl.Result{RequeueAfter: r.shortWait}, errors.Wrap(r.client.Status().Update(ctx, cr), errUpdateResourceStatus)
 	}
-
-	for _, o := range composedResources {
+	refs := make([]corev1.ObjectReference, len(composedResources))
+	copy(refs, cr.GetResourceReferences())
+	for i, o := range composedResources {
 		if err := r.client.Apply(ctx, o, rresource.MustBeControllableBy(cr.GetUID())); err != nil {
 			log.Info("Cannot apply the changes to the child resources", "error", err)
 			cr.SetConditions(v1alpha1.ReconcileError(errors.Wrap(err, fmt.Sprintf("%s: %s/%s of type %s", errApply, o.GetName(), o.GetNamespace(), o.GetObjectKind().GroupVersionKind().String()))))
+			return ctrl.Result{RequeueAfter: r.shortWait}, errors.Wrap(r.client.Status().Update(ctx, cr), errUpdateResourceStatus)
+		}
+		ref := *meta.ReferenceTo(o, o.GetObjectKind().GroupVersionKind())
+		if refs[i] == ref {
+			continue
+		}
+		refs[i] = ref
+		cr.SetResourceReferences(refs)
+		if err := r.client.Apply(ctx, cr); err != nil {
+			log.Info("Cannot run apply composite resource", "error", err)
+			cr.SetConditions(v1alpha1.ReconcileError(errors.Wrap(err, "cannot apply composite resource")))
 			return ctrl.Result{RequeueAfter: r.shortWait}, errors.Wrap(r.client.Status().Update(ctx, cr), errUpdateResourceStatus)
 		}
 	}

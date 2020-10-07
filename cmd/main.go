@@ -58,7 +58,9 @@ func main() {
 	nn := types.NamespacedName{Name: *xrdName}
 	kingpin.FatalIfError(getXRD(ctx, nn, xrd), fmt.Sprintf("cannot get composite resource definition with name: %s", *xrdName))
 
-	r := controller.NewReconciler(mgr, xrd.GetCompositeGroupVersionKind(), controller.WithEngine(restoperation.NewRESTEngine("http://127.0.0.1:8080")))
+	r := controller.NewReconciler(mgr, xrd.GetCompositeGroupVersionKind(), controller.WithEngine(
+		restoperation.NewRESTEngine("http://127.0.0.1:8080", mgr.GetClient())),
+	)
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(xrd.GetCompositeGroupVersionKind())
 	// TODO(muvaf): let's assume that only this controller reconciles that XRD.
